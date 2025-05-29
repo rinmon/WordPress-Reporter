@@ -42,6 +42,7 @@ WordPressサイトの設定情報を抽出し、HTMLレポートを生成する�
     -   Google Chrome
     -   Mozilla Firefox
     -   Microsoft Edge
+    -   Safari (macOS)
 -   macOSおよびWindowsでテスト済みです。
 
 ## 開発者向け情報
