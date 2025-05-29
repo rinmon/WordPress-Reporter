@@ -4,7 +4,7 @@ WordPressサイトの設定情報を抽出し、HTMLレポートを生成する�
 
 ## バッジ
 <!-- このバッジは、最初のリリース/タグがプッシュされ、GitHub上でタグからリリースが作成された後に有効になります。 -->
-[![GitHub release (latest by date)](https://img.shields.io/github/v/release/rinmon/WordPress-Reporter)](https://github.com/rinmon/WordPress-Reporter/releases/latest)
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/rinmon/WordPress-Reporter?label=v1.1.0)](https://github.com/rinmon/WordPress-Reporter/releases/latest)
 <!-- ライセンスを選択した場合は、ここにライセンスバッジを追加してください -->
 <!-- 例: [![GitHub license](https://img.shields.io/github/license/rinmon/WordPress-Reporter)](https://github.com/rinmon/WordPress-Reporter/blob/main/LICENSE) -->
 

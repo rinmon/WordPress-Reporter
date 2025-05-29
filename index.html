@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WordPress 設定情報抽出ツール</title>
+    <title>WordPress 設定情報抽出ツール v1.1.0</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- React CDN -->
@@ -35,6 +35,7 @@
             const [currentView, setCurrentView] = useState('login'); // 'login', 'loading', 'results'
             const [extractedData, setExtractedData] = useState(null);
             const [progress, setProgress] = useState(0);
+            const [showHelpModal, setShowHelpModal] = useState(false);
 
             const fetchWordPressData = async (endpoint, options = {}) => {
                 const headers = new Headers();
@@ -398,155 +399,255 @@
                 setIsLoading(false);
             };
 
-            if (currentView === 'loading') {
-                return (
-                    <div className="bg-white shadow-md rounded-lg p-8">
-                        <h1 className="text-2xl font-bold text-center text-blue-600 mb-6">WordPress 設定情報抽出ツール</h1>
-                        <p className="text-center text-gray-700 mb-4">設定情報を抽出中です...</p>
-                        <div className="w-full bg-gray-200 rounded-full h-6 mb-4">
-                            <div 
-                                className="bg-blue-500 h-6 rounded-full text-xs font-medium text-blue-100 text-center p-1 leading-none"
-                                style={{ width: `${progress}%` }}
-                            >
-                                {progress}%
-                            </div>
+
+
+
+
+
+
+
+            const categoryTitles = {
+                general: '一般設定',
+                display: '表示設定',
+                discussion: 'ディスカッション設定',
+                media: 'メディア設定',
+                permalinks: 'パーマリンク設定',
+                plugins: '有効化されているプラグイン一覧',
+                theme: '使用中のテーマ',
+                users: '登録ユーザー一覧と役割',
+                widgets: 'ウィジェット設定',
+                menus: 'メニュー設定'
+            };
+
+            const renderDetailSection = (categoryKey, categoryData) => {
+                // categoryTitles is in scope
+                if (categoryData && typeof categoryData === 'object' && categoryData.error) {
+                    return (
+                        <div>
+                            <p className="text-red-600 font-semibold">エラー: {categoryData.error}</p>
+                            {categoryData.details && <p className="text-sm text-gray-500">詳細: {categoryData.details}</p>}
                         </div>
-                        <p className="text-center text-gray-600 text-sm mb-6">この処理には数分かかる場合があります。</p>
-                        <div className="text-center">
-                            <button
-                                onClick={handleCancel}
-                                className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
-                            >
-                                キャンセル
-                            </button>
+                    );
+                }
+                if (Array.isArray(categoryData)) {
+                    return (
+                        <ul className="list-disc pl-5 space-y-1">
+                            {categoryData.map((item, index) => (
+                                <li key={index} className="mb-1 p-2 bg-gray-50 rounded text-sm">
+                                    {categoryKey === 'plugins' ? (
+                                        <div>
+                                            <strong>{item.name || 'N/A'}</strong> (v{item.version || 'N/A'})<br />
+                                            {item.author && <span className="text-xs italic">作者: {item.author.replace(/<[^>]+>/g, '')}</span>}<br/>
+                                            {item.description && <p className="text-xs mt-1">説明: {item.description.replace(/<[^>]+>/g, '')}</p>}
+                                        </div>
+                                    ) : categoryKey === 'users' ? (
+                                        <span><strong>{item.name || 'N/A'}</strong> (Slug: {item.slug || 'N/A'}, Roles: {item.roles || 'N/A'})</span>
+                                    ) : (
+                                        <pre className="text-xs whitespace-pre-wrap">{JSON.stringify(item, null, 2)}</pre>
+                                    )}
+                                </li>
+                            ))}
+                        </ul>
+                    );
+                }
+                if (typeof categoryData === 'object' && categoryData !== null) {
+                     if (categoryData.status && Object.keys(categoryData).length === 1) { // For unsupported features like widgets/menus
+                         return <p className="text-gray-500 italic">{categoryData.status}</p>;
+                     }
+                    return (
+                        <table className="w-full text-sm table-fixed">
+                            <tbody>
+                                {Object.entries(categoryData).map(([key, value]) => (
+                                    <tr key={key} className="border-b hover:bg-gray-50">
+                                        <th className="p-2 text-left align-top bg-gray-100 w-1/3 md:w-1/4 break-words">{key}</th>
+                                        <td className="p-2 align-top break-words">{String(value !== null && value !== undefined ? value : 'N/A')}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    );
+                }
+                return <p>{String(categoryData)}</p>;
+            };
+
+            const HelpModal = ({ onClose }) => {
+                return (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                        <div className="bg-white p-6 rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+                            <div className="flex justify-between items-center mb-4">
+                                <h2 className="text-2xl font-bold text-gray-800">使い方ガイド</h2>
+                                <button onClick={onClose} className="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+                            </div>
+                            
+                            <div className="space-y-6 text-gray-700">
+                                <section>
+                                    <h3 class="text-xl font-semibold mb-2 text-blue-600">ツールの利用手順</h3>
+                                    <ol class="list-decimal list-inside space-y-1 pl-4">
+                                        <li><strong>ダウンロード:</strong> このリポジトリから <code>index.html</code> ファイルを取得します。</li>
+                                        <li><strong>開く:</strong> <code>index.html</code> ファイルを直接ウェブブラウザ（例: Chrome, Firefox, Edge）で開きます。</li>
+                                        <li><strong>認証情報を入力:</strong>
+                                            <ul class="list-disc list-inside space-y-1 pl-6 mt-1">
+                                                <li>WordPressサイトの完全なURL（例: <code>https://example.com</code>）を入力します。</li>
+                                                <li>WordPressのユーザー名またはアプリケーションパスワードのユーザー名を入力します。</li>
+                                                <li>WordPressのパスワードまたはアプリケーションパスワードを入力します。（セキュリティ上の理由やプラグインによる制限により、通常のパスワードでは認証できない場合があります。その際は、<strong>アプリケーションパスワードの使用を強く推奨します。</strong> 設定方法は下記を参照してください。）</li>
+                                            </ul>
+                                        </li>
+                                        <li><strong>データ抽出:</strong> 「ログインして抽出開始」ボタンをクリックします。ツールがWordPressサイトからデータを取得します。</li>
+                                        <li><strong>レポートをダウンロード:</strong> 抽出が完了すると、概要が表示されます。「HTMLをダウンロード」ボタンをクリックしてレポートを保存します。</li>
+                                    </ol>
+                                </section>
+
+                                <section>
+                                    <h3 class="text-xl font-semibold mb-2 text-orange-600">アプリケーションパスワードの推奨と設定方法</h3>
+                                    <p className="mb-2">セキュリティプラグインやホスティング環境の設定により、通常のユーザー名とパスワードによるREST API認証（基本認証）が無効化されている場合があります。その場合、WordPressの「アプリケーションパスワード」機能を利用することで、より安全かつ確実に認証を行うことができます。</p>
+                                    <h4 class="text-lg font-semibold mt-3 mb-1">設定手順:</h4>
+                                    <ol class="list-decimal list-inside space-y-1 pl-4">
+                                        <li><strong>WordPressダッシュボードにログイン:</strong> 対象のWordPressサイトの管理画面にログインします。</li>
+                                        <li><strong>ユーザープロファイル編集画面へ移動:</strong> 左側メニューの「ユーザー」から、ご自身のユーザー名（またはAPI連携用の専用ユーザー）にマウスオーバーし、「編集」をクリックします。</li>
+                                        <li><strong>アプリケーションパスワードセクションへスクロール:</strong> プロファイル編集画面を下にスクロールしていくと、「アプリケーションパスワード」というセクションがあります。</li>
+                                        <li><strong>新しいアプリケーションパスワード名を入力:</strong> 「新しいアプリケーションパスワード名」の欄に、このツールで使用することがわかるような名前（例: <code>WordPress Reporter</code>）を入力します。</li>
+                                        <li><strong>「新しいアプリケーションパスワードを追加」をクリック:</strong> ボタンをクリックすると、下にパスワードが生成されます。
+                                            <ul class="list-disc list-inside space-y-1 pl-6 mt-1">
+                                                <li class="text-red-600 font-semibold"><strong>重要:</strong> このパスワードは<strong>一度しか表示されません。</strong> 必ずコピーして安全な場所に保管してください。画面を閉じると二度と確認できません。</li>
+                                            </ul>
+                                        </li>
+                                        <li><strong>ツールで使用:</strong> 本ツールの「ユーザー名」欄にはWordPressのユーザー名を、「パスワード」欄にはここで生成・コピーしたアプリケーションパスワード（スペースを含めずに）を入力してください。</li>
+                                    </ol>
+                                    <p className="mt-3">アプリケーションパスワードを利用することで、メインのパスワードを直接使用することなく、本ツールにWordPressサイトへのアクセス権を安全に付与できます。</p>
+                                </section>
+                            </div>
+                            <div className="mt-6 text-right">
+                                <button onClick={onClose} className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
+                                    閉じる
+                                </button>
+                            </div>
                         </div>
                     </div>
                 );
-            }
+            };
 
-            if (currentView === 'results') {
-                return (
-                    <div className="bg-white shadow-md rounded-lg p-8">
-                        <h1 className="text-2xl font-bold text-center text-blue-600 mb-6">WordPress 設定情報抽出ツール</h1>
-                        <div className="text-center mb-6">
-                            <svg className="w-16 h-16 text-green-500 mx-auto mb-3" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                            <h2 className="text-xl font-semibold text-gray-800">抽出完了</h2>
-                            <p className="text-gray-600 mt-2">WordPress サイト「{extractedData?.siteTitle || 'N/A'}」の設定情報を抽出しました。</p>
-                            <p className="text-gray-600 text-sm">レポート生成日時: {extractedData?.generationDate || 'N/A'}</p>
-                            {/* Summary Section */}
-                            <div className="mt-4 pt-4 border-t">
-                                <h3 className="text-lg font-semibold text-gray-700 mb-2">抽出結果サマリー</h3>
-                                <p className="text-gray-600">総抽出カテゴリ数: {extractedData?.summary?.categories || 0}</p>
-                                <p className="text-gray-600">総項目数: {extractedData?.summary?.totalItems || 0}</p>
-                                {extractedData?.summary?.itemsPerCategory && Object.keys(extractedData.summary.itemsPerCategory).length > 0 && (
-                                    <div className="mt-2">
-                                        <h4 className="text-md font-semibold text-gray-600">カテゴリ別詳細:</h4>
-                                        <ul className="list-disc list-inside pl-4 text-sm text-gray-500">
-                                            {Object.entries(extractedData.summary.itemsPerCategory).map(([category, count]) => {
-                                                // Map category keys to Japanese titles for display
-                                                const categoryTitles = {
-                                                    general: '一般設定',
-                                                    reading: '表示設定',
-                                                    discussion: 'ディスカッション設定',
-                                                    media: 'メディア設定',
-                                                    permalinks: 'パーマリンク設定',
-                                                    plugins: 'プラグイン',
-                                                    theme: 'テーマ',
-                                                    users: 'ユーザー',
-                                                    widgets: 'ウィジェット',
-                                                    menus: 'メニュー'
-                                                };
-                                                return <li key={category}>{categoryTitles[category] || category}: {count}</li>;
-                                            })}
-                                        </ul>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                        <div className="flex justify-center space-x-4">
-                            <button 
-                                onClick={handleGenerateHtml} 
-                                className="bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-6 rounded-lg focus:outline-none focus:shadow-outline text-lg"
-                                disabled={!extractedData}
-                            >
-                                HTML をダウンロード
-                            </button>
-                            <button 
-                                onClick={resetApp} 
-                                className="bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-6 rounded-lg focus:outline-none focus:shadow-outline text-lg"
-                            >
-                                別のサイトを抽出
-                            </button>
-                        </div>
-                    </div>
-                );
-            }
-
-            // Login View (default)
             return (
-                <div className="bg-white shadow-md rounded-lg p-8 max-w-lg mx-auto">
-                    <h1 className="text-3xl font-bold text-center text-blue-700 mb-8">WordPress 設定情報抽出ツール</h1>
-                    
-                    {error && (
-                        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-6" role="alert">
-                            <strong className="font-bold">エラー: </strong>
-                            <span className="block sm:inline">{error}</span>
+                <div id="root" className="container mx-auto p-4 min-h-screen flex flex-col">
+                    <div className="text-right text-xs text-gray-500 mb-2">バージョン 1.1.0</div>
+                    {currentView === 'login' && (
+                        <div className="bg-white shadow-md rounded-lg p-8 max-w-lg mx-auto">
+                            <h1 className="text-3xl font-bold text-center text-blue-700 mb-8">WordPress 設定情報抽出ツール</h1>
+                            {error && (
+                                <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-6" role="alert">
+                                    <strong className="font-bold">エラー: </strong>
+                                    <span className="block sm:inline">{error}</span>
+                                </div>
+                            )}
+                            <form onSubmit={handleLogin}>
+                                <div className="mb-6">
+                                    <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="wpUrl">WordPress サイト URL</label>
+                                    <input className="shadow appearance-none border rounded w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" id="wpUrl" type="url" placeholder="例: https://example.com" value={wpUrl} onChange={(e) => setWpUrl(e.target.value)} required />
+                                </div>
+                                <div className="mb-6">
+                                    <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="username">ユーザー ID またはメールアドレス</label>
+                                    <input className="shadow appearance-none border rounded w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" id="username" type="text" placeholder="WordPress のユーザー名" value={username} onChange={(e) => setUsername(e.target.value)} required />
+                                </div>
+                                <div className="mb-8">
+                                    <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="password">パスワード (またはアプリケーションパスワード)</label>
+                                    <input className="shadow appearance-none border rounded w-full py-3 px-4 text-gray-700 mb-3 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" id="password" type="password" placeholder="••••••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required />
+                                </div>
+                                <div className="flex items-center justify-center">
+                                    <button className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg focus:outline-none focus:shadow-outline w-full text-lg transition duration-150 ease-in-out transform hover:scale-105 mb-4" type="submit" disabled={isLoading}>
+                                        {isLoading ? '処理中...' : 'ログインして抽出開始'}
+                                    </button>
+                                </div>
+                            </form>
+                            <button onClick={() => setShowHelpModal(true)} className="w-full bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline mt-2">
+                                使い方を見る
+                            </button>
                         </div>
                     )}
+                    {currentView === 'loading' && (
+                        <div className="bg-white shadow-md rounded-lg p-8">
+                            <h1 className="text-2xl font-bold text-center text-blue-600 mb-6">WordPress 設定情報抽出ツール</h1>
+                            <p className="text-center text-gray-700 mb-4">設定情報を抽出中です...</p>
+                            <div className="w-full bg-gray-200 rounded-full h-6 mb-4">
+                                <div className="bg-blue-500 h-6 rounded-full text-xs font-medium text-blue-100 text-center p-1 leading-none" style={{ width: `${progress}%` }}>
+                                    {progress}%
+                                </div>
+                            </div>
+                            <p className="text-center text-gray-600 text-sm mb-6">この処理には数分かかる場合があります。</p>
+                            <div className="text-center">
+                                <button onClick={handleCancel} className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
+                                    キャンセル
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                    {currentView === 'results' && (() => {
+                        if (!extractedData || !extractedData.details) {
+                            return (
+                                <div className="bg-white shadow-md rounded-lg p-8 max-w-lg mx-auto text-center">
+                                    <p className="text-red-500 font-semibold">表示するデータがありません。</p>
+                                    <button
+                                        onClick={() => { setCurrentView('login'); setExtractedData(null); }}
+                                        className="mt-4 bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
+                                    >
+                                        ログイン画面に戻る
+                                    </button>
+                                </div>
+                            );
+                        }
 
-                    <form onSubmit={handleLogin}>
-                        <div className="mb-6">
-                            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="wpUrl">
-                                WordPress サイト URL
-                            </label>
-                            <input 
-                                className="shadow appearance-none border rounded w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                id="wpUrl" 
-                                type="url" 
-                                placeholder="例: https://example.com"
-                                value={wpUrl}
-                                onChange={(e) => setWpUrl(e.target.value)}
-                                required
-                            />
-                        </div>
-                        <div className="mb-6">
-                            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="username">
-                                ユーザー ID またはメールアドレス
-                            </label>
-                            <input 
-                                className="shadow appearance-none border rounded w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                id="username" 
-                                type="text" 
-                                placeholder="WordPress のユーザー名"
-                                value={username}
-                                onChange={(e) => setUsername(e.target.value)}
-                                required
-                            />
-                        </div>
-                        <div className="mb-8">
-                            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="password">
-                                パスワード (またはアプリケーションパスワード)
-                            </label>
-                            <input 
-                                className="shadow appearance-none border rounded w-full py-3 px-4 text-gray-700 mb-3 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                id="password" 
-                                type="password" 
-                                placeholder="••••••••••••"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                required
-                            />
-                        </div>
-                        <div className="flex items-center justify-center">
-                            <button 
-                                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg focus:outline-none focus:shadow-outline w-full text-lg transition duration-150 ease-in-out transform hover:scale-105"
-                                type="submit"
-                                disabled={isLoading}
-                            >
-                                {isLoading ? '処理中...' : 'ログインして抽出開始'}
-                            </button>
-                        </div>
-                    </form>
+                        const { siteTitle, generationDate, details, summary } = extractedData;
+                        // categoryTitles and renderDetailSection are now in App's scope
+
+                        return (
+                            <div className="bg-white shadow-xl rounded-lg p-4 sm:p-6 md:p-8 max-w-5xl w-full mx-auto my-8">
+                                <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 pb-4 border-b">
+                                    <div className="mb-4 md:mb-0">
+                                        <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-blue-700">{siteTitle || 'WordPress 設定レポート'}</h1>
+                                        <p className="text-xs sm:text-sm text-gray-500 mt-1">生成日時: {generationDate}</p>
+                                    </div>
+                                    <div className="flex space-x-2 sm:space-x-3">
+                                        <button
+                                            onClick={() => { setCurrentView('login'); setExtractedData(null); }}
+                                            className="bg-gray-500 hover:bg-gray-600 text-white font-semibold py-2 px-3 sm:px-4 text-xs sm:text-sm rounded focus:outline-none focus:shadow-outline transition duration-150"
+                                        >
+                                            戻る
+                                        </button>
+                                        <button
+                                            onClick={handleGenerateHtml}
+                                            disabled={isLoading}
+                                            className={`bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-3 sm:px-4 text-xs sm:text-sm rounded focus:outline-none focus:shadow-outline transition duration-150 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                        >
+                                            {isLoading ? '生成中...' : 'HTMLをダウンロード'}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {summary && (
+                                     <div className="mb-6 p-3 sm:p-4 bg-indigo-50 rounded-lg shadow">
+                                        <h2 className="text-lg sm:text-xl font-semibold text-indigo-700 mb-3">抽出結果サマリー</h2>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 sm:gap-4 text-xs sm:text-sm">
+                                            <div><strong>総カテゴリ数:</strong> {summary.categories}</div>
+                                            <div><strong>総アイテム数:</strong> {summary.totalItems}</div>
+                                            {summary.itemsPerCategory && Object.entries(summary.itemsPerCategory).map(([key, value]) => (
+                                                <div key={key} className="truncate"><strong>{categoryTitles[key] || key.charAt(0).toUpperCase() + key.slice(1)}:</strong> {value}</div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="space-y-6">
+                                    {details && Object.entries(details).map(([categoryKey, categoryValue]) => (
+                                        <section key={categoryKey} className="p-3 sm:p-4 border rounded-md shadow-sm bg-white">
+                                            <h2 className="text-lg sm:text-xl font-semibold text-gray-800 mb-3 capitalize border-b pb-2">
+                                                {categoryTitles[categoryKey] || categoryKey.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
+                                            </h2>
+                                            {renderDetailSection(categoryKey, categoryValue)}
+                                        </section>
+                                    ))}
+                                </div>
+                            </div>
+                        );
+                    })()}
+                    {showHelpModal && <HelpModal onClose={() => setShowHelpModal(false)} />}
                 </div>
             );
         }
