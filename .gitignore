@@ -1,0 +1,6 @@
+# macOS
+.DS_Store
+
+# Optional: If you have any local build artifacts or editor specific files
+# .vscode/
+# *.log

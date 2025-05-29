@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WordPress 設定情報抽出ツール</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/react@17/umd/react.development.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/react-dom@17/umd/react-dom.development.js"></script>
+    <!-- Babel CDN (for JSX) -->
+    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js"></script>
+    <!-- jsPDF CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif; /* Default browser font, React app will manage its own */
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div id="root" class="container mx-auto p-4"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        const { jsPDF } = window.jspdf;
+
+        const App = () => {
+            const [wpUrl, setWpUrl] = useState('');
+            const [username, setUsername] = useState('');
+            const [password, setPassword] = useState('');
+            const [isLoading, setIsLoading] = useState(false);
+            const [error, setError] = useState('');
+            const [currentView, setCurrentView] = useState('login'); // 'login', 'loading', 'results'
+            const [extractedData, setExtractedData] = useState(null);
+            const [progress, setProgress] = useState(0);
+
+            const fetchWordPressData = async (endpoint, options = {}) => {
+                const headers = new Headers();
+                headers.append('Authorization', 'Basic ' + btoa(username + ':' + password));
+                
+                // Ensure wpUrl doesn't end with a slash before appending endpoint
+                const normalizedWpUrl = wpUrl.endsWith('/') ? wpUrl.slice(0, -1) : wpUrl;
+                const fullUrl = `${normalizedWpUrl}${endpoint}`;
+
+                try {
+                    const response = await fetch(fullUrl, { ...options, headers });
+                    if (!response.ok) {
+                        let errorData;
+                        let errorMessage = `サーバーエラー (${response.status}): ${response.statusText}`; // Default message
+                        try {
+                            errorData = await response.json();
+                            if (errorData && errorData.message) {
+                                errorMessage = errorData.message; // Prefer message from WordPress
+                            }
+                        } catch (e) { /* ignore if error response is not json */ }
+
+                        if (response.status === 401 || response.status === 403) {
+                            let detailedErrorMessage = errorMessage;
+                            if (response.status === 401) {
+                                detailedErrorMessage = `ログインに失敗しました。ユーザーID、パスワード、またはアプリケーションパスワードが正しいか確認してください。WordPressサイトでREST APIのBasic認証またはアプリケーションパスワードが有効になっている必要もあります。 (詳細: ${errorData.message || response.statusText || 'エラー情報なし'}${errorData.code ? ` [コード: ${errorData.code}]` : ''})`;
+                            } else { // 403
+                                detailedErrorMessage = `要求された操作を実行する権限がありません。このユーザーアカウントに必要な権限 (通常は管理者権限) が付与されているか確認してください。 (詳細: ${errorData.message || response.statusText || 'エラー情報なし'}${errorData.code ? ` [コード: ${errorData.code}]` : ''})`;
+                            }
+                            throw new Error(detailedErrorMessage);
+                        }
+                        if (response.status === 404) {
+                            // Check if it's a general API 404 or endpoint specific
+                             try {
+                                const baseApiResponse = await fetch(`${normalizedWpUrl}/wp-json/`, { headers });
+                                if (!baseApiResponse.ok) {
+                                     throw new Error(`WordPressのREST APIエンドポイント (${normalizedWpUrl}/wp-json/) にアクセスできませんでした (404 Not Found)。URLが正しいか、WordPressサイトでREST APIが有効になっているか、パーマリンク設定が「デフォルト」以外に設定されているかを確認してください。`);
+                                }
+                                // If base API is fine, then it's the specific endpoint that's 404
+                                throw new Error(`指定されたエンドポイント (${endpoint}) が見つかりません (404)。WordPressのバージョンや設定を確認してください。`); 
+                            } catch (e) {
+                                if (e.message && e.message.includes('指定されたエンドポイント')) { // Check if it's the specific endpoint 404
+                                    throw new Error(e.message + ` このエンドポイントは、特定のプラグインやWordPressのバージョンに依存する場合があります。`);
+                                }
+                                throw new Error(e.message || `REST API (${normalizedWpUrl}/wp-json/) が見つからないか、アクセスできません。URL、パーマリンク設定、またはREST APIの有効状態を確認してください。`);
+                            }
+                        }
+                        // For other errors, use the errorMessage (either from WP or the default server error)
+                        throw new Error(errorMessage);
+                    }
+                    return await response.json();
+                } catch (err) {
+                    console.error('Fetch error:', err);
+                    if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
+                        throw new Error(`ネットワークエラー: 指定されたURL (${fullUrl}) に接続できませんでした。URLが正しいか、インターネット接続が利用可能か、ファイアウォールやCORSポリシーによってアクセスがブロックされていないか確認してください。詳細: ${err.message}`);
+                    }
+                    throw err; // Re-throw other errors to be caught by handleLogin or specific catch blocks
+                }
+            };
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setError('');
+                setIsLoading(true);
+                setCurrentView('loading');
+                setProgress(0);
+
+                if (!wpUrl || !username || !password) {
+                    setError('WordPress サイト URL、ユーザー ID、パスワードをすべて入力してください。');
+                    setIsLoading(false);
+                    setCurrentView('login');
+                    return;
+                }
+
+                console.log('Attempting to fetch WordPress data from:', wpUrl);
+                const allExtractedData = {};
+                let siteTitle = 'タイトル不明';
+
+                try {
+                    setProgress(5); // Starting
+                    console.log('Fetching Site Settings (/wp-json/wp/v2/settings)...');
+                    const settings = await fetchWordPressData('/wp-json/wp/v2/settings');
+                    siteTitle = settings.title || 'タイトル不明';
+                    allExtractedData.general = {
+                        'サイトのタイトル': settings.title,
+                        'キャッチフレーズ': settings.description,
+                        'WordPress アドレス (URL)': settings.url, // This is site URL, not WP install URL
+                        'サイトアドレス (URL)': settings.home, // This is home URL
+                        '管理者メールアドレス': settings.email,
+                        'メンバーシップ': settings.users_can_register ? '誰でもユーザー登録ができるようにする' : '登録不可',
+                        '新規ユーザーのデフォルト権限グループ': settings.default_role,
+                        'サイトの言語': settings.language,
+                        'タイムゾーン': settings.timezone_string,
+                        '日付フォーマット': settings.date_format,
+                        '時刻フォーマット': settings.time_format,
+                        '週の始まり': settings.start_of_week,
+                    };
+                    allExtractedData.display = {
+                        'ホームページの表示': settings.show_on_front === 'page' ? '固定ページ' : '最新の投稿',
+                        'ホームページ': settings.page_on_front ? `ID: ${settings.page_on_front}` : 'N/A',
+                        '投稿ページ': settings.page_for_posts ? `ID: ${settings.page_for_posts}` : 'N/A',
+                        '1ページに表示する最大投稿数': settings.posts_per_page,
+                        'フィード内の各投稿に含める内容': settings.posts_per_rss === 'full' ? '全文を表示' : '抜粋のみを表示',
+                        '検索エンジンでの表示': settings.blog_public ? '検索エンジンがサイトをインデックスしないようにする' : 'インデックス許可',
+                    };
+                    setProgress(30);
+
+                    try {
+                        console.log('Fetching Active Plugins (/wp-json/wp/v2/plugins?status=active)...');
+                        const activePlugins = await fetchWordPressData('/wp-json/wp/v2/plugins?status=active');
+                        allExtractedData.plugins = activePlugins.map(plugin => ({
+                            name: plugin.name,
+                            version: plugin.version,
+                            author: plugin.author_uri ? `<a href="${plugin.author_uri}" target="_blank">${plugin.author}</a>` : plugin.author,
+                            description: plugin.description.rendered || plugin.description
+                        }));
+                    } catch (pluginError) {
+                        console.warn('Could not fetch plugin list:', pluginError.message);
+                        allExtractedData.plugins = { error: 'プラグイン情報の取得に失敗しました。', details: pluginError.message };
+                    }
+                    setProgress(60);
+
+                    try {
+                        console.log('Fetching Active Theme (/wp-json/wp/v2/themes?status=active)...');
+                        const activeThemes = await fetchWordPressData('/wp-json/wp/v2/themes?status=active');
+                        if (activeThemes && activeThemes.length > 0) {
+                            const theme = activeThemes[0]; // Typically only one active theme
+                            allExtractedData.theme = {
+                                name: theme.name.rendered || theme.name,
+                                version: theme.version,
+                                author: theme.author.rendered ? `<a href="${theme.author_uri.rendered}" target="_blank">${theme.author.rendered}</a>` : theme.author.rendered,
+                                description: theme.description.rendered || theme.description,
+                            };
+                        } else {
+                            allExtractedData.theme = { error: '有効なテーマが見つかりませんでした。', details: 'APIからの応答が空でした。' };
+                        }
+                    } catch (themeError) {
+                        console.warn('Could not fetch theme information:', themeError.message);
+                        allExtractedData.theme = { error: 'テーマ情報の取得に失敗しました。', details: themeError.message };
+                    }
+                    // Discussion, Media, and Permalink settings are also in the 'settings' object fetched earlier
+                    allExtractedData.discussion = {
+                        '新しい投稿へのコメントを許可する': settings.default_comment_status === 'open' ? 'はい' : 'いいえ',
+                        'コメント投稿者の名前とメールアドレスの入力を必須にする': settings.require_name_email ? 'はい' : 'いいえ',
+                        'ユーザー登録してログインしたユーザーのみコメントをつけられるようにする': settings.comment_registration ? 'はい' : 'いいえ',
+                        // 'コメントの手動承認を必須とする': settings.comment_moderation ? 'はい' : 'いいえ', // This is often true by default
+                        'すでに承認されたコメントの投稿者のコメントを許可し、それ以外のコメントを承認待ちにする': settings.comment_whitelist ? 'はい' : 'いいえ',
+                        'コメント内で許可されないキーワード数': settings.comment_max_links, // Number of links that causes comment to be held for moderation
+                        'モデレーションを行うキーワード': settings.moderation_keys ? settings.moderation_keys.replace(/\n/g, ', ') : 'なし',
+                        '許可しないキーワード': settings.disallowed_keys ? settings.disallowed_keys.replace(/\n/g, ', ') : 'なし',
+                        '自分宛のメール通知 (コメントが投稿されたとき)': settings.comments_notify ? 'はい' : 'いいえ',
+                        '自分宛のメール通知 (コメントが承認待ちになったとき)': settings.moderation_notify ? 'はい' : 'いいえ',
+                        'アバターの表示': settings.show_avatars ? 'アバターを表示する' : '表示しない',
+                        '評価': settings.avatar_rating ? `「${settings.avatar_rating.toUpperCase()}」評価が適切` : 'N/A',
+                        'デフォルトのアバター': settings.avatar_default || 'ミステリーパーソン',
+                    };
+
+                    allExtractedData.media = {
+                        'サムネイルのサイズ': `幅 ${settings.thumbnail_size_w} x 高さ ${settings.thumbnail_size_h}` + (settings.thumbnail_crop ? ' (サムネイルを実寸法にトリミングする)' : ''),
+                        '中サイズ': `最大幅 ${settings.medium_size_w}, 最大高さ ${settings.medium_size_h}`,
+                        '大サイズ': `最大幅 ${settings.large_size_w}, 最大高さ ${settings.large_size_h}`,
+                        'アップロードしたファイルを年月ベースのフォルダーに整理': settings.uploads_use_yearmonth_folders ? 'はい' : 'いいえ',
+                    };
+
+                    allExtractedData.permalinks = {
+                        'パーマリンク構造': settings.permalink_structure || 'デフォルト',
+                        'カテゴリーベース': settings.category_base || 'なし',
+                        'タグベース': settings.tag_base || 'なし',
+                    };
+                    setProgress(85);
+
+                    console.log('Fetching Users (/wp-json/wp/v2/users?per_page=100)...');
+                    // Attempt to get users. This might require 'list_users' capability.
+                    // For simplicity, fetching first 100 users. Real app might need pagination handling.
+                    try {
+                        const users = await fetchWordPressData('/wp-json/wp/v2/users?per_page=100&context=view'); // context=edit often needed for roles
+                        allExtractedData.users = users.map(user => ({
+                            name: user.name,
+                            slug: user.slug,
+                            roles: user.roles ? user.roles.join(', ') : 'N/A (ロール情報取得不可)',
+                            // link: user.link // Link to author archive
+                        }));
+                    } catch (userError) {
+                        console.warn('Could not fetch user list:', userError.message);
+                        allExtractedData.users = { error: 'ユーザーリストの取得に失敗しました。権限が不足している可能性があります。', details: userError.message };
+                    }
+                    setProgress(95);
+
+                    // Widgets and Menus are more complex and often not fully exposed via core REST API without specific plugins or themes.
+                    // For now, we'll skip them as per the spec's note "REST API で取得可能な範囲"
+                    allExtractedData.widgets = { status: 'ウィジェット情報の取得は現在サポートされていません。' };
+                    allExtractedData.menus = { status: 'メニュー情報の取得は現在サポートされていません。' };
+
+                    console.log('All data fetched:', allExtractedData);
+                    setProgress(100);
+
+                    const summaryDetails = {};
+                    let totalItemsFetched = 0;
+                    for (const key in allExtractedData) {
+                        const data = allExtractedData[key];
+                        if (data && data.error) {
+                            summaryDetails[key] = 'エラー';
+                        } else if (Array.isArray(data)) {
+                            summaryDetails[key] = `${data.length} 件`;
+                            totalItemsFetched += data.length;
+                        } else if (typeof data === 'object' && data !== null && data.status) {
+                             summaryDetails[key] = '未サポート'; // For widgets/menus status
+                        } else if (typeof data === 'object' && data !== null) {
+                            const itemCount = Object.keys(data).length;
+                            summaryDetails[key] = `${itemCount} 項目`;
+                            totalItemsFetched += itemCount;
+                        } else {
+                            summaryDetails[key] = '不明';
+                        }
+                    }
+
+                    setExtractedData({
+                        siteTitle: siteTitle,
+                        generationDate: new Date().toLocaleString('ja-JP'),
+                        details: allExtractedData,
+                        summary: {
+                            categories: Object.keys(allExtractedData).length,
+                            itemsPerCategory: summaryDetails, // Add this line
+                            totalItems: totalItemsFetched // Add this line
+                        }
+                    });
+                    setCurrentView('results');
+                } catch (err) {
+                    console.error('Login or data fetching failed:', err);
+                    setError(`エラーが発生しました: ${err.message}`);
+                    setCurrentView('login');
+                } finally {
+                    setIsLoading(false);
+                }
+            }; // This closes const handleLogin
+
+        const resetApp = () => {
+            setWpUrl('');
+            setUsername('');
+            setPassword('');
+            setIsLoading(false);
+            setError('');
+            setCurrentView('login');
+            setExtractedData(null);
+            setProgress(0);
+        };
+        
+
+            
+            const handleCancel = () => {
+                // In a real scenario, you might need to abort API requests
+                console.log('Operation cancelled by user.');
+                resetApp();
+            };
+
+            const handleGenerateHtml = async () => {
+                if (!extractedData || !extractedData.details) {
+                    alert('HTMLを生成するためのデータがありません。');
+                    return;
+                }
+                console.log('Generating HTML...');
+                setIsLoading(true);
+                setProgress(0); // Reset progress for HTML generation
+
+                // HTML generation logic will go here
+                const siteTitle = extractedData.siteTitle || 'WordPress 設定レポート';
+                const generationDate = extractedData.generationDate;
+                let htmlContent = `<!DOCTYPE html>\n<html lang="ja">\n<head>\n  <meta charset="UTF-8">\n  <title>WordPress設定レポート - ${siteTitle}</title>\n  <style>\n    body { font-family: sans-serif; margin: 20px; line-height: 1.6; }\n    h1, h2, h3 { color: #333; }\n    table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }\n    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; }\n    th { background-color: #f2f2f2; }\n    .category { margin-bottom: 30px; padding-bottom: 20px; border-bottom: 1px solid #eee; }\n    .category:last-child { border-bottom: none; }\n    .error { color: red; font-weight: bold; }\n    .error-details { font-size: 0.9em; color: #777; }\n    ul, ol { padding-left: 20px; }\n  </style>\n</head>\n<body>\n`;
+
+                htmlContent += `  <h1>WordPress設定レポート: ${siteTitle}</h1>\n`;
+                htmlContent += `  <p>生成日時: ${generationDate}</p>\n`;
+                
+                // Table of Contents (Placeholder for now, can be dynamic later)
+                htmlContent += `  <h2>目次</h2>\n  <ul>\n`;
+                const categoryTitles = {
+                    general: '一般設定',
+                    display: '表示設定',
+                    discussion: 'ディスカッション設定',
+                    media: 'メディア設定',
+                    permalinks: 'パーマリンク設定',
+                    plugins: '有効化されているプラグイン一覧',
+                    theme: '使用中のテーマ',
+                    users: '登録ユーザー一覧と役割',
+                    widgets: 'ウィジェット設定',
+                    menus: 'メニュー設定'
+                };
+                for (const categoryKey in extractedData.details) {
+                    htmlContent += `    <li><a href="#${categoryKey}">${categoryTitles[categoryKey] || categoryKey}</a></li>\n`;
+                }
+                htmlContent += `  </ul>\n`;
+                setProgress(15);
+
+                // Content Sections
+                let currentHtmlProgress = 15;
+                const totalCategories = Object.keys(extractedData.details).length;
+                const progressPerCategory = totalCategories > 0 ? Math.floor((90 - 15) / totalCategories) : 0;
+
+                for (const categoryKey in extractedData.details) {
+                    const categoryData = extractedData.details[categoryKey];
+                    const categoryTitle = categoryTitles[categoryKey] || categoryKey;
+                    htmlContent += `  <div class="category" id="${categoryKey}">\n`;
+                    htmlContent += `    <h2>${categoryTitle}</h2>\n`;
+
+                    if (categoryData && typeof categoryData === 'object' && categoryData.error) {
+                        htmlContent += `    <p class="error">エラー: ${categoryData.error}</p>\n`;
+                        if (categoryData.details) {
+                            htmlContent += `    <p class="error-details">詳細: ${categoryData.details}</p>\n`;
+                        }
+                    } else if (Array.isArray(categoryData)) {
+                        htmlContent += '    <ul>\n';
+                        categoryData.forEach(item => {
+                            htmlContent += '      <li>';
+                            if (categoryKey === 'plugins') {
+                                htmlContent += `<strong>プラグイン名:</strong> ${item.name || 'N/A'} (v${item.version || 'N/A'})`;
+                                if(item.description) htmlContent += `<br><em>説明:</em> ${item.description.replace(/<[^>]+>/g, '')}`;
+                                if(item.author) htmlContent += `<br><em>作者:</em> ${item.author.replace(/<[^>]+>/g, '')}`;
+                            } else if (categoryKey === 'users') {
+                                htmlContent += `<strong>ユーザー名:</strong> ${item.name || 'N/A'} (Slug: ${item.slug || 'N/A'})`;
+                                htmlContent += `<br><em>役割:</em> ${item.roles || 'N/A'}`;
+                            } else {
+                                htmlContent += JSON.stringify(item); // Fallback for other arrays
+                            }
+                            htmlContent += '</li>\n';
+                        });
+                        htmlContent += '    </ul>\n';
+                    } else if (typeof categoryData === 'object' && categoryData !== null) {
+                        if (categoryData.status && Object.keys(categoryData).length === 1) {
+                             htmlContent += `    <p>${categoryData.status}</p>\n`;
+                        } else {
+                            htmlContent += '    <table>\n';
+                            for (const key in categoryData) {
+                                const value = categoryData[key] !== null && categoryData[key] !== undefined ? String(categoryData[key]) : 'N/A';
+                                htmlContent += `      <tr><th>${key}</th><td>${value}</td></tr>\n`;
+                            }
+                            htmlContent += '    </table>\n';
+                        }
+                    } else {
+                        htmlContent += `    <p>${String(categoryData)}</p>\n`; // Fallback for simple values
+                    }
+                    htmlContent += `  </div>\n`;
+                    currentHtmlProgress = Math.min(currentHtmlProgress + progressPerCategory, 90);
+                    setProgress(currentHtmlProgress);
+                }
+
+                htmlContent += `</body>\n</html>`;
+
+                // Create a Blob and trigger download
+                const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                const safeSiteTitleForFile = (extractedData.siteTitle || 'WordPressReport').replace(/[^a-z0-9_\-]+/gi, '_');
+                const dateStrForFile = new Date().toISOString().slice(0,10).replace(/-/g,'');
+                link.download = `${safeSiteTitleForFile}_${dateStrForFile}.html`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+
+                setProgress(100);
+                console.log('HTML Generated and download initiated.');
+                setIsLoading(false);
+            };
+
+            if (currentView === 'loading') {
+                return (
+                    <div className="bg-white shadow-md rounded-lg p-8">
+                        <h1 className="text-2xl font-bold text-center text-blue-600 mb-6">WordPress 設定情報抽出ツール</h1>
+                        <p className="text-center text-gray-700 mb-4">設定情報を抽出中です...</p>
+                        <div className="w-full bg-gray-200 rounded-full h-6 mb-4">
+                            <div 
+                                className="bg-blue-500 h-6 rounded-full text-xs font-medium text-blue-100 text-center p-1 leading-none"
+                                style={{ width: `${progress}%` }}
+                            >
+                                {progress}%
+                            </div>
+                        </div>
+                        <p className="text-center text-gray-600 text-sm mb-6">この処理には数分かかる場合があります。</p>
+                        <div className="text-center">
+                            <button
+                                onClick={handleCancel}
+                                className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
+                            >
+                                キャンセル
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (currentView === 'results') {
+                return (
+                    <div className="bg-white shadow-md rounded-lg p-8">
+                        <h1 className="text-2xl font-bold text-center text-blue-600 mb-6">WordPress 設定情報抽出ツール</h1>
+                        <div className="text-center mb-6">
+                            <svg className="w-16 h-16 text-green-500 mx-auto mb-3" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            <h2 className="text-xl font-semibold text-gray-800">抽出完了</h2>
+                            <p className="text-gray-600 mt-2">WordPress サイト「{extractedData?.siteTitle || 'N/A'}」の設定情報を抽出しました。</p>
+                            <p className="text-gray-600 text-sm">レポート生成日時: {extractedData?.generationDate || 'N/A'}</p>
+                            {/* Summary Section */}
+                            <div className="mt-4 pt-4 border-t">
+                                <h3 className="text-lg font-semibold text-gray-700 mb-2">抽出結果サマリー</h3>
+                                <p className="text-gray-600">総抽出カテゴリ数: {extractedData?.summary?.categories || 0}</p>
+                                <p className="text-gray-600">総項目数: {extractedData?.summary?.totalItems || 0}</p>
+                                {extractedData?.summary?.itemsPerCategory && Object.keys(extractedData.summary.itemsPerCategory).length > 0 && (
+                                    <div className="mt-2">
+                                        <h4 className="text-md font-semibold text-gray-600">カテゴリ別詳細:</h4>
+                                        <ul className="list-disc list-inside pl-4 text-sm text-gray-500">
+                                            {Object.entries(extractedData.summary.itemsPerCategory).map(([category, count]) => {
+                                                // Map category keys to Japanese titles for display
+                                                const categoryTitles = {
+                                                    general: '一般設定',
+                                                    reading: '表示設定',
+                                                    discussion: 'ディスカッション設定',
+                                                    media: 'メディア設定',
+                                                    permalinks: 'パーマリンク設定',
+                                                    plugins: 'プラグイン',
+                                                    theme: 'テーマ',
+                                                    users: 'ユーザー',
+                                                    widgets: 'ウィジェット',
+                                                    menus: 'メニュー'
+                                                };
+                                                return <li key={category}>{categoryTitles[category] || category}: {count}</li>;
+                                            })}
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        <div className="flex justify-center space-x-4">
+                            <button 
+                                onClick={handleGenerateHtml} 
+                                className="bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-6 rounded-lg focus:outline-none focus:shadow-outline text-lg"
+                                disabled={!extractedData}
+                            >
+                                HTML をダウンロード
+                            </button>
+                            <button 
+                                onClick={resetApp} 
+                                className="bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-6 rounded-lg focus:outline-none focus:shadow-outline text-lg"
+                            >
+                                別のサイトを抽出
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            // Login View (default)
+            return (
+                <div className="bg-white shadow-md rounded-lg p-8 max-w-lg mx-auto">
+                    <h1 className="text-3xl font-bold text-center text-blue-700 mb-8">WordPress 設定情報抽出ツール</h1>
+                    
+                    {error && (
+                        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-6" role="alert">
+                            <strong className="font-bold">エラー: </strong>
+                            <span className="block sm:inline">{error}</span>
+                        </div>
+                    )}
+
+                    <form onSubmit={handleLogin}>
+                        <div className="mb-6">
+                            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="wpUrl">
+                                WordPress サイト URL
+                            </label>
+                            <input 
+                                className="shadow appearance-none border rounded w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                id="wpUrl" 
+                                type="url" 
+                                placeholder="例: https://example.com"
+                                value={wpUrl}
+                                onChange={(e) => setWpUrl(e.target.value)}
+                                required
+                            />
+                        </div>
+                        <div className="mb-6">
+                            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="username">
+                                ユーザー ID またはメールアドレス
+                            </label>
+                            <input 
+                                className="shadow appearance-none border rounded w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                id="username" 
+                                type="text" 
+                                placeholder="WordPress のユーザー名"
+                                value={username}
+                                onChange={(e) => setUsername(e.target.value)}
+                                required
+                            />
+                        </div>
+                        <div className="mb-8">
+                            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="password">
+                                パスワード (またはアプリケーションパスワード)
+                            </label>
+                            <input 
+                                className="shadow appearance-none border rounded w-full py-3 px-4 text-gray-700 mb-3 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                id="password" 
+                                type="password" 
+                                placeholder="••••••••••••"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                required
+                            />
+                        </div>
+                        <div className="flex items-center justify-center">
+                            <button 
+                                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg focus:outline-none focus:shadow-outline w-full text-lg transition duration-150 ease-in-out transform hover:scale-105"
+                                type="submit"
+                                disabled={isLoading}
+                            >
+                                {isLoading ? '処理中...' : 'ログインして抽出開始'}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
