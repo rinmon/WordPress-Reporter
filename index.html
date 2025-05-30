@@ -13,6 +13,8 @@
     <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js"></script>
     <!-- jsPDF CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <!-- Stripe Buy Button JS -->
+    <script async src="https://js.stripe.com/v3/buy-button.js"></script>
     <style>
         body {
             font-family: 'Arial', sans-serif; /* Default browser font, React app will manage its own */
@@ -514,6 +516,20 @@
                                         <li><strong>ツールで使用:</strong> 本ツールの「ユーザー名」欄にはWordPressのユーザー名を、「パスワード」欄にはここで生成・コピーしたアプリケーションパスワード（スペースを含めずに）を入力してください。</li>
                                     </ol>
                                     <p className="mt-3">アプリケーションパスワードを利用することで、メインのパスワードを直接使用することなく、本ツールにWordPressサイトへのアクセス権を安全に付与できます。</p>
+                                </section>
+                                
+                                <section>
+                                    <h3 className="text-xl font-semibold mb-2 text-green-600">開発者をサポート</h3>
+                                    <p className="mb-2">このツールは無償で提供していますが、開発やメンテナンスの継続のため、ご支援いただけると大変励みになります。100円からの寄付が可能です。</p>
+                                    <div className="flex justify-center my-4">
+                                        <div className="stripe-button-container">
+                                            <stripe-buy-button
+                                                buy-button-id="buy_btn_1RUL3vDXWBIYjlhWV7YOLDNZ"
+                                                publishable-key="pk_live_Dj6bMKs4I7TKquAasQ2yS54F00rJhDJj7H">
+                                            </stripe-buy-button>
+                                        </div>
+                                    </div>
+                                    <p className="text-sm text-center text-gray-600">ご支援いただいた方には心より感謝申し上げます。皆様のサポートが今後の機能改善や新機能開発の励みとなります。</p>
                                 </section>
                             </div>
                             <div className="mt-6 text-right">
