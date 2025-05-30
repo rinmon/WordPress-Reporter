@@ -71,10 +71,10 @@ WordPressサイトの設定情報を抽出し、HTMLレポートを生成する�
 ## 寄付・サポート
 このツールは無償で提供していますが、開発やメンテナンスの継続のため、ご支援いただけると大変励みになります。
 
-寄付をご希望の方は下記ページからStripeによる寄付が可能です。
+以下のリンクから100円からの寄付が可能です。
 
-[→ 寄付ページへアクセス](donation.html)
+[→ 寄付ページ（100円から）](https://checkout.chotto.news/b/9B6cN5bT0ePjcW97V99R605)
 
-リポジトリをクローンまたはダウンロードした場合は、`donation.html`ファイルをブラウザで開くと寄付ボタンが表示されます。
+[![寄付ボタン](https://img.shields.io/badge/寄付する-Stripe-blue?style=for-the-badge&logo=stripe)](https://checkout.chotto.news/b/9B6cN5bT0ePjcW97V99R605)
 
 ご支援いただいた方には心より感謝申し上げます。皆様のサポートが今後の機能改善や新機能開発の励みとなります。
