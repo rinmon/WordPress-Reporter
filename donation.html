@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WordPress Reporter - 寄付ページ</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col items-center justify-center p-4">
+    <div class="bg-white rounded-lg shadow-lg p-6 max-w-md w-full">
+        <h1 class="text-2xl font-bold text-center mb-6">WordPress Reporter サポート</h1>
+        
+        <p class="mb-4">WordPress Reporterの開発とメンテナンスをサポートしていただき、ありがとうございます。皆様からのご支援が、今後の機能改善や新機能開発の励みとなります。</p>
+        
+        <div class="flex justify-center my-6">
+            <script async src="https://js.stripe.com/v3/buy-button.js"></script>
+            <stripe-buy-button
+                buy-button-id="buy_btn_1RUL3vDXWBIYjlhWV7YOLDNZ"
+                publishable-key="pk_live_Dj6bMKs4I7TKquAasQ2yS54F00rJhDJj7H">
+            </stripe-buy-button>
+        </div>
+        
+        <p class="text-sm text-gray-600 text-center mt-4">ご支援いただいた方には心より感謝申し上げます。</p>
+        
+        <div class="mt-8 text-center">
+            <a href="index.html" class="text-blue-600 hover:underline">WordPress Reporterに戻る</a>
+        </div>
+    </div>
+</body>
+</html>
